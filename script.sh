@@ -1,12 +1,18 @@
 #!/bin/bash
+# ROM source patches
+
+color="\033[0;32m"
+end="\033[0m"
+
 
 # Removals
 rm -rf .repo/local_manifests
 
 # Initialize repo with specified manifest
+echo -e "${color}Initialising The Repo${end}"
 repo init --depth=1 --no-repo-verify -u https://github.com/Los-Ext/manifest.git -b 14R --git-lfs -g default,-mips,-darwin,-notdefault
 
-# Clone local_manifests repository
+echo -e "${color}local_manifests repository${end}"
 git clone https://github.com/shravansayz/local_manifests --depth 1 -b ext .repo/local_manifests
 
 # Sync the repositories
