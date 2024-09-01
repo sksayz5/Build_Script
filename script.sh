@@ -1,17 +1,40 @@
 #!/bin/bash
 
+# Removals
+rm -rf .repo/local_manifests
+
+# Initialize repo with specified manifest
+repo init --depth=1 --no-repo-verify -u https://github.com/Los-Ext/manifest.git -b 14R --git-lfs -g default,-mips,-darwin,-notdefault
+
+# Clone local_manifests repository
+git clone https://github.com/shravansayz/local_manifests --depth 1 -b ext .repo/local_manifests
+
+# Sync the repositories
+/opt/crave/resync.sh
+
+#customs
+rm -rf frameworks/base
+git clone https://github.com/sksayz5/frameworks_base.git -b main frameworks/base --depth=1
+
+#Private Keys
+rm -rf vendor/lineage-priv
+git clone https://github.com/shravansayz/private_keys.git -b rise vendor/lineage-priv
+
+# Set up build environment
+source build/envsetup.sh
+
 # Build Configuration. Required variables to compile the ROM.
-CONFIG_LUNCH=""
-CONFIG_OFFICIAL_FLAG=""
+CONFIG_LUNCH="lineage_RMX1901-user"
+CONFIG_OFFICIAL_FLAG="Unofficial"
 CONFIG_TARGET="bacon"
 
 # Telegram Configuration
-CONFIG_CHATID="-"
-CONFIG_BOT_TOKEN=""
-CONFIG_ERROR_CHATID=""
+CONFIG_CHATID="-1001983626693"
+CONFIG_BOT_TOKEN="6268171294:AAGBIBXu3gEQeegjB99FUpLFJrDzp9zr22E"
+CONFIG_ERROR_CHATID="-1001983626693"
 
 # PixelDrain api keys to upload builds
-CONFIG_PDUP_API=""
+CONFIG_PDUP_API="0af11e0c-4111-4e59-b65c-e811e7b1135b"
 
 # Turning off server after build or no
 POWEROFF=""
@@ -53,10 +76,8 @@ while [[ $# -gt 0 ]]; do
 Usage: ./build_rom.sh [OPTION]
 Example:
     ./$(basename $0) -s -c or ./$(basename $0) --sync --clean
-
 Mandatory options:
     No option is mandatory!, just simply run the script without passing any parameter.
-
 Options:
     -s, --sync            Sync sources before building.
     -c, --clean           Clean build directory before compilation.
@@ -191,7 +212,6 @@ if [[ -n $SYNC ]]; then
     # Send a notification that the syncing process has started.
 
     sync_start_message="🟡 | <i>Syncing sources!!</i>
-
 <b>• ROM:</b> <code>$ROM_NAME</code>
 <b>• DEVICE:</b> <code>$DEVICE</code>
 <b>• JOBS:</b> <code>$CONFIG_SYNC_JOBS Cores</code>
@@ -220,12 +240,10 @@ if [[ -n $SYNC ]]; then
         SECONDS=$(((($DIFFERENCE % 3600) / 60) / 60))
 
         sync_finished_message="🟢 | <i>Sources synced!!</i>
-
 <b>• ROM:</b> <code>$ROM_NAME</code>
 <b>• DEVICE:</b> <code>$DEVICE</code>
 <b>• JOBS:</b> <code>$CONFIG_SYNC_JOBS Cores</code>
 <b>• DIRECTORY:</b> <code>$(pwd)</code>
-
 <i>Syncing took $MINUTES minutes(s) and $SECONDS seconds(s)</i>"
 
         edit_message "$sync_finished_message" "$CONFIG_CHATID" "$sync_message_id"
@@ -246,7 +264,6 @@ fi
 # Send a notification that the build process has started.
 
 build_start_message="🟡 | <i>Compiling ROM...</i>
-
 <b>• ROM:</b> <code>$ROM_NAME</code>
 <b>• DEVICE:</b> <code>$DEVICE</code>
 <b>• JOBS:</b> <code>$CONFIG_COMPILE_JOBS Cores</code>
@@ -287,7 +304,6 @@ until [ -z "$(jobs -r)" ]; do
     fi
 
     build_progress_message="🟡 | <i>Compiling ROM...</i>
-
 <b>• ROM:</b> <code>$ROM_NAME</code>
 <b>• DEVICE:</b> <code>$DEVICE</code>
 <b>• JOBS:</b> <code>$CONFIG_COMPILE_JOBS Cores</code>
@@ -302,7 +318,6 @@ until [ -z "$(jobs -r)" ]; do
 done
 
 build_progress_message="🟡 | <i>Compiling ROM...</i>
-
 <b>• ROM:</b> <code>$ROM_NAME</code>
 <b>• DEVICE:</b> <code>$DEVICE</code>
 <b>• JOBS:</b> <code>$CONFIG_COMPILE_JOBS Cores</code>
@@ -339,14 +354,12 @@ else
     zip_file_size=$(ls -sh $zip_file | awk '{print $1}')
 
     build_finished_message="🟢 | <i>ROM compiled!!</i>
-
 <b>• ROM:</b> <code>$ROM_NAME</code>
 <b>• DEVICE:</b> <code>$DEVICE</code>
 <b>• TYPE:</b> <code>$([ "$OFFICIAL" == "1" ] && echo "Official" || echo "Unofficial")</code>
 <b>• SIZE:</b> <code>$zip_file_size</code>
 <b>• MD5SUM:</b> <code>$zip_file_md5sum</code>
 <b>• DOWNLOAD:</b> $zip_file_url
-
 <i>Compilation took $HOURS hours(s) and $MINUTES minutes(s)</i>"
 
     edit_message "$build_finished_message" "$CONFIG_CHATID" "$build_message_id"
