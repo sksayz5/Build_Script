@@ -1,380 +1,243 @@
-#!/bin/bash
-# ROM source patches
-
-color="\033[0;32m"
-end="\033[0m"
-
-
-# Removals
-rm -rf .repo/local_manifests
-
-# Initialize repo with specified manifest
-echo -e "${color}Initialising The Repo${end}"
-repo init --depth=1 --no-repo-verify -u https://github.com/Los-Ext/manifest.git -b 14R --git-lfs -g default,-mips,-darwin,-notdefault
-
-echo -e "${color}local_manifests repository${end}"
-git clone https://github.com/shravansayz/local_manifests --depth 1 -b ext .repo/local_manifests
-
-# Sync the repositories
-/opt/crave/resync.sh
-
-#customs
-rm -rf frameworks/base
-git clone https://github.com/sksayz5/frameworks_base.git -b main frameworks/base --depth=1
-
-#Private Keys
-rm -rf vendor/lineage-priv
-git clone https://github.com/shravansayz/private_keys.git -b rise vendor/lineage-priv
-
-# Set up build environment
-source build/envsetup.sh
-
-# Build Configuration. Required variables to compile the ROM.
-CONFIG_LUNCH="lineage_RMX1901-user"
-CONFIG_OFFICIAL_FLAG="Unofficial"
-CONFIG_TARGET="bacon"
-
-# Telegram Configuration
-env:
-CONFIG_CHATID= "${{ secrets.TELEGRAM_TO }}"
-CONFIG_BOT_TOKEN= "${{ secrets.TELEGRAM_TOKEN }}"
-CONFIG_ERROR_CHATID= "${{ secrets.TELEGRAM_TO }}"
-
-# PixelDrain api keys to upload builds
-CONFIG_PDUP_API="0af11e0c-4111-4e59-b65c-e811e7b1135b"
-
-# Turning off server after build or no
-POWEROFF=""
-
-# Script Constants. Required variables throughout the script.
-YELLOW=$(tput setaf 3)
-BOLD=$(tput bold)
-RESET=$(tput sgr0)
-BOLD_GREEN=${BOLD}$(tput setaf 2)
-OFFICIAL="0"
-ROOT_DIRECTORY="$(pwd)"
-
-# Post Constants. Required variables for posting purposes.
-DEVICE="$(sed -e "s/^.*_//" -e "s/-.*//" <<<"$CONFIG_LUNCH")"
-ROM_NAME="$(sed "s#.*/##" <<<"$(pwd)")"
-OUT="$(pwd)/out/target/product/$DEVICE"
-STICKER_URL="https://index.sauraj.eu.org/api/raw/?path=/sticker.webp"
-
-# CLI parameters. Fetch whatever input the user has provided.
-while [[ $# -gt 0 ]]; do
-    case $1 in
-    -s | --sync)
-        SYNC="1"
-        ;;
-    -c | --clean)
-        CLEAN="1"
-        ;;
-    -o | --official)
-        if [ -n "$CONFIG_OFFICIAL_FLAG" ]; then
-            OFFICIAL="1"
-        else
-            echo -e "$RED\nERROR: Please specify the flag to export for official build in the configuration!!$RESET\n"
-            exit 1
-        fi
-        ;;
-    -h | --help)
-        echo -e "\nNote: • You should specify all the mandatory variables in the script!
-      • Just run "./$0" for normal build
-Usage: ./build_rom.sh [OPTION]
-Example:
-    ./$(basename $0) -s -c or ./$(basename $0) --sync --clean
-Mandatory options:
-    No option is mandatory!, just simply run the script without passing any parameter.
-Options:
-    -s, --sync            Sync sources before building.
-    -c, --clean           Clean build directory before compilation.
-    -o, --official        Build the official variant during compilation.\n"
-        exit 1
-        ;;
-    *)
-        echo -e "$RED\nUnknown parameter(s) passed: $1$RESET\n"
-        exit 1
-        ;;
-    esac
-    shift
-done
-
-# Configuration Checking. Exit the script if required variables aren"t set.
-if [[ $CONFIG_LUNCH == "" ]] || [[ $CONFIG_TARGET == "" ]]; then
-    echo -e "$RED\nERROR: Please specify all of the mandatory variables!! Exiting now...$RESET\n"
-    exit 1
-fi
-
-# Telegram Environment. Declare all of the related constants and functions.
-export BOT_MESSAGE_URL="https://api.telegram.org/bot$CONFIG_BOT_TOKEN/sendMessage"
-export BOT_EDIT_MESSAGE_URL="https://api.telegram.org/bot$CONFIG_BOT_TOKEN/editMessageText"
-export BOT_FILE_URL="https://api.telegram.org/bot$CONFIG_BOT_TOKEN/sendDocument"
-export BOT_STICKER_URL="https://api.telegram.org/bot$CONFIG_BOT_TOKEN/sendSticker"
-export BOT_PIN_URL="https://api.telegram.org/bot$CONFIG_BOT_TOKEN/pinChatMessage"
-
-send_message() {
-    local RESPONSE=$(curl "$BOT_MESSAGE_URL" -d chat_id="$2" \
-        -d "parse_mode=html" \
-        -d "disable_web_page_preview=true" \
-        -d text="$1")
-    local MESSAGE_ID=$(echo "$RESPONSE" | jq ".result.message_id")
-    echo "$MESSAGE_ID"
-}
-
-edit_message() {
-    curl "$BOT_EDIT_MESSAGE_URL" -d chat_id="$2" \
-        -d "parse_mode=html" \
-        -d "message_id=$3" \
-        -d text="$1"
-}
-
-send_file() {
-    curl --progress-bar -F document=@"$1" "$BOT_FILE_URL" \
-        -F chat_id="$2" \
-        -F "disable_web_page_preview=true" \
-        -F "parse_mode=html"
-}
-
-send_sticker() {
-    curl -sL "$1" -o "$ROOT_DIRECTORY/sticker.webp"
-
-    local STICKER_FILE="$ROOT_DIRECTORY/sticker.webp"
-
-    curl "$BOT_STICKER_URL" -F sticker=@"$STICKER_FILE" \
-        -F chat_id="$2" \
-        -F "is_animated=false" \
-        -F "is_video=false"
-}
-
-pin_message() {
-    curl "$BOT_PIN_URL" \
-        -d chat_id="$1" \
-        -d message_id="$2"
-}
-
-upload_file() {
-    RESPONSE=$(curl -T "$1" -u :"$CONFIG_PDUP_API" https://pixeldrain.com/api/file/)
-    HASH=$(echo "$RESPONSE" | grep -Po '(?<="id":")[^"]*')
-
-    echo "https://pixeldrain.com/u/$HASH"
-}
-
-upload_ksau(){
-    # curl -s https://raw.githubusercontent.com/ksauraj/global_index_source/master/setup | bash && ksau setup
-    link=$(ksau -q upload "$1" Public/hanoip)
-    echo "$link"
-}
-
-send_message_to_error_chat() {
-    local response=$(curl -s -X POST "$BOT_MESSAGE_URL" -d chat_id="$CONFIG_ERROR_CHATID" \
-        -d "parse_mode=html" \
-        -d "disable_web_page_preview=true" \
-        -d text="$1")
-    local message_id=$(echo "$response" | jq ".result | .message_id")
-    echo "$message_id"
-}
-
-send_file_to_error_chat() {
-    curl --progress-bar -F document=@"$1" "$BOT_FILE_URL" \
-        -F chat_id="$CONFIG_ERROR_CHATID" \
-        -F "disable_web_page_preview=true" \
-        -F "parse_mode=html"
-}
-
-fetch_progress() {
-    local PROGRESS=$(
-        sed -n '/ ninja/,$p' "$ROOT_DIRECTORY/build.log" |
-            grep -Po '\d+% \d+/\d+' |
-            tail -n1 |
-            sed -e 's/ / (/; s/$/)/'
-    )
-
-    if [ -z "$PROGRESS" ]; then
-        echo "Initializing the build system..."
-    else
-        echo "$PROGRESS"
-    fi
-}
-
-# Cleanup Files. Nuke all of the files from previous runs.
-if [ -f "out/error.log" ]; then
-    rm -f "out/error.log"
-fi
-
-if [ -f "out/.lock" ]; then
-    rm -f "out/.lock"
-fi
-
-if [ -f "$ROOT_DIRECTORY/build.log" ]; then
-    rm -f "$ROOT_DIRECTORY/build.log"
-fi
-
-# Jobs Configuration. Determine the number of cores to be used.
-CORE_COUNT=$(nproc --all)
-CONFIG_SYNC_JOBS="$([ "$CORE_COUNT" -gt 8 ] && echo "12" || echo "$CORE_COUNT")"
-CONFIG_COMPILE_JOBS="$CORE_COUNT"
-
-# Execute Parameters. Do the work if specified.
-if [[ -n $SYNC ]]; then
-    # Send a notification that the syncing process has started.
-
-    sync_start_message="🟡 | <i>Syncing sources!!</i>
-<b>• ROM:</b> <code>$ROM_NAME</code>
-<b>• DEVICE:</b> <code>$DEVICE</code>
-<b>• JOBS:</b> <code>$CONFIG_SYNC_JOBS Cores</code>
-<b>• DIRECTORY:</b> <code>$(pwd)</code>"
-
-    sync_message_id=$(send_message "$sync_start_message" "$CONFIG_CHATID")
-
-    SYNC_START=$(TZ=Asia/Kolkata date +"%s")
-
-    echo -e "$BOLD_GREEN\nStarting to sync sources now...$RESET\n"
-    if ! repo sync -c --jobs-network=$CONFIG_SYNC_JOBS -j$CONFIG_SYNC_JOBS --jobs-checkout=$CONFIG_SYNC_JOBS --optimized-fetch --prune --force-sync --no-clone-bundle --no-tags; then
-        echo -e "$RED\nInitial sync has failed!!$RESET" && echo -e "$BOLD_GREEN\nTrying to sync again with lesser arguments...$RESET\n"
-
-        if ! repo sync -j$CONFIG_SYNC_JOBS; then
-            echo -e "$RED\nSyncing has failed completely!$RESET" && echo -e "$BOLD_GREEN\nStarting the build now...$RESET\n"
-        else
-            SYNC_END=$(TZ=Asia/Dhaka date +"%s")
-        fi
-    else
-        SYNC_END=$(TZ=Asia/Dhaka date +"%s")
-    fi
-
-    if [[ -n $SYNC_END ]]; then
-        DIFFERENCE=$((SYNC_END - SYNC_START))
-        MINUTES=$((($DIFFERENCE % 3600) / 60))
-        SECONDS=$(((($DIFFERENCE % 3600) / 60) / 60))
-
-        sync_finished_message="🟢 | <i>Sources synced!!</i>
-<b>• ROM:</b> <code>$ROM_NAME</code>
-<b>• DEVICE:</b> <code>$DEVICE</code>
-<b>• JOBS:</b> <code>$CONFIG_SYNC_JOBS Cores</code>
-<b>• DIRECTORY:</b> <code>$(pwd)</code>
-<i>Syncing took $MINUTES minutes(s) and $SECONDS seconds(s)</i>"
-
-        edit_message "$sync_finished_message" "$CONFIG_CHATID" "$sync_message_id"
-    else
-        sync_failed_message="🔴 | <i>Syncing sources failed!!</i>
-    
-<i>Trying to compile the ROM now...</i>"
-
-        edit_message "$sync_failed_message" "$CONFIG_CHATID" "$sync_message_id"
-    fi
-fi
-
-if [[ -n $CLEAN ]]; then
-    echo -e "$BOLD_GREEN\nNuking the out directory now...$RESET\n"
-    rm -rf "out"
-fi
-
-# Send a notification that the build process has started.
-
-build_start_message="🟡 | <i>Compiling ROM...</i>
-<b>• ROM:</b> <code>$ROM_NAME</code>
-<b>• DEVICE:</b> <code>$DEVICE</code>
-<b>• JOBS:</b> <code>$CONFIG_COMPILE_JOBS Cores</code>
-<b>• TYPE:</b> <code>$([ "$OFFICIAL" == "1" ] && echo "Official" || echo "Unofficial")</code>
-<b>• PROGRESS</b>: <code>Lunching...</code>"
-
-build_message_id=$(send_message "$build_start_message" "$CONFIG_CHATID")
-
-BUILD_START=$(TZ=Asia/Dhaka date +"%s")
-
-# Start Compilation. Compile the ROM according to the configuration.
-echo -e "$BOLD_GREEN\nSetting up the build environment...$RESET"
-source build/envsetup.sh
-
-echo -e "$BOLD_GREEN\nStarting to lunch "$DEVICE" now...$RESET"
-lunch "$CONFIG_LUNCH"
-
-if [ $? -eq 0 ]; then
-    echo -e "$BOLD_GREEN\nStarting to build now...$RESET"
-    m installclean -j$CONFIG_COMPILE_JOBS
-    m "$CONFIG_TARGET" -j$CONFIG_COMPILE_JOBS 2>&1 | tee -a "$ROOT_DIRECTORY/build.log" &
-else
-    echo -e "$RED\nFailed to lunch "$DEVICE"$RESET"
-
-    build_failed_message="🔴 | <i>ROM compilation failed...</i>
-    
-<i>Failed at lunching $DEVICE...</i>"
-
-    edit_message "$build_failed_message" "$CONFIG_CHATID" "$build_message_id"
-    send_sticker "$STICKER_URL" "$CONFIG_CHATID"
-    exit 1
-fi
-
-# Contiounsly update the progress of the build.
-until [ -z "$(jobs -r)" ]; do
-    if [ "$(fetch_progress)" = "$previous_progress" ]; then
-        continue
-    fi
-
-    build_progress_message="🟡 | <i>Compiling ROM...</i>
-<b>• ROM:</b> <code>$ROM_NAME</code>
-<b>• DEVICE:</b> <code>$DEVICE</code>
-<b>• JOBS:</b> <code>$CONFIG_COMPILE_JOBS Cores</code>
-<b>• TYPE:</b> <code>$([ "$OFFICIAL" == "1" ] && echo "Official" || echo "Unofficial")</code>
-<b>• PROGRESS:</b> <code>$(fetch_progress)</code>"
-
-    edit_message "$build_progress_message" "$CONFIG_CHATID" "$build_message_id"
-
-    previous_progress=$(fetch_progress)
-
-    sleep 5
-done
-
-build_progress_message="🟡 | <i>Compiling ROM...</i>
-<b>• ROM:</b> <code>$ROM_NAME</code>
-<b>• DEVICE:</b> <code>$DEVICE</code>
-<b>• JOBS:</b> <code>$CONFIG_COMPILE_JOBS Cores</code>
-<b>• TYPE:</b> <code>$([ "$OFFICIAL" == "1" ] && echo "Official" || echo "Unofficial")</code>
-<b>• PROGRESS:</b> <code>$(fetch_progress)</code>"
-
-edit_message "$build_progress_message" "$CONFIG_CHATID" "$build_message_id"
-
-# Upload Build. Upload the output ROM ZIP file to the index.
-BUILD_END=$(TZ=Asia/Dhaka date +"%s")
-DIFFERENCE=$((BUILD_END - BUILD_START))
-HOURS=$(($DIFFERENCE / 3600))
-MINUTES=$((($DIFFERENCE % 3600) / 60))
-
-if [ -s "out/error.log" ]; then
-    # Send a notification that the build has failed.
-    build_failed_message="🔴 | <i>ROM compilation failed...</i>
-    
-<i>Check out the log below!</i>"
-
-    edit_message_to_error_chat "$build_failed_message" "$CONFIG_ERROR_CHATID" "$build_message_id"
-    send_file_to_error_chat "out/error.log" "$CONFIG_ERROR_CHATID"
-#     send_sticker "$STICKER_URL" "$CONFIG_CHATID"
-else
-    ota_file=$(ls "$OUT"/*ota*.zip | tail -n -1)
-    rm "$ota_file"
-
-    zip_file=$(ls "$OUT"/*$DEVICE*.zip | tail -n -1)
-
-    echo -e "$BOLD_GREEN\nStarting to upload the ZIP file now...$RESET\n"
-
-    zip_file_url=$(upload_file "$zip_file")
-    zip_file_md5sum=$(md5sum $zip_file | awk '{print $1}')
-    zip_file_size=$(ls -sh $zip_file | awk '{print $1}')
-
-    build_finished_message="🟢 | <i>ROM compiled!!</i>
-<b>• ROM:</b> <code>$ROM_NAME</code>
-<b>• DEVICE:</b> <code>$DEVICE</code>
-<b>• TYPE:</b> <code>$([ "$OFFICIAL" == "1" ] && echo "Official" || echo "Unofficial")</code>
-<b>• SIZE:</b> <code>$zip_file_size</code>
-<b>• MD5SUM:</b> <code>$zip_file_md5sum</code>
-<b>• DOWNLOAD:</b> $zip_file_url
-<i>Compilation took $HOURS hours(s) and $MINUTES minutes(s)</i>"
-
-    edit_message "$build_finished_message" "$CONFIG_CHATID" "$build_message_id"
-    pin_message "$CONFIG_CHATID" "$build_message_id"
-#     send_sticker "$STICKER_URL" "$CONFIG_CHATID"
-fi
-
-if [[ $POWEROFF == true ]]; then
-echo -e "$BOLD_GREEN\nAyo, powering off server...$RESET"
-sudo poweroff
-fi
+import os
+import subprocess
+import time
+import requests
+import json
+from telethon import TelegramClient
+
+# Configuration variables
+CONFIG_LUNCH = ""
+CONFIG_OFFICIAL_FLAG = ""
+CONFIG_TARGET = "bacon"
+CONFIG_CHATID = "-"
+CONFIG_BOT_TOKEN = ""
+CONFIG_ERROR_CHATID = ""
+CONFIG_PDUP_API = ""
+POWEROFF = ""
+
+# Script Constants
+YELLOW = "\033[33m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+BOLD_GREEN = BOLD + "\033[32m"
+OFFICIAL = "0"
+ROOT_DIRECTORY = os.getcwd()
+
+# Post Constants
+DEVICE = CONFIG_LUNCH.split("_")[-1].split("-")[0]
+ROM_NAME = os.path.basename(os.getcwd())
+OUT = os.path.join(os.getcwd(), "out/target/product", DEVICE)
+STICKER_URL = "https://index.sauraj.eu.org/api/raw/?path=/sticker.webp"
+
+# Telegram Client
+client = TelegramClient('ci_bot', CONFIG_BOT_TOKEN, CONFIG_BOT_TOKEN)
+
+async def send_message(text, chat_id):
+    message = await client.send_message(chat_id, text, parse_mode='html', link_preview=False)
+    return message.id
+
+async def edit_message(text, chat_id, message_id):
+    await client.edit_message(chat_id, message_id, text, parse_mode='html')
+
+async def send_file(file_path, chat_id):
+    await client.send_file(chat_id, file_path, parse_mode='html')
+
+async def send_sticker(sticker_url, chat_id):
+    sticker_file = os.path.join(ROOT_DIRECTORY, "sticker.webp")
+    response = requests.get(sticker_url)
+    with open(sticker_file, 'wb') as f:
+        f.write(response.content)
+    await client.send_file(chat_id, sticker_file, is_animated=False, is_video=False)
+
+async def pin_message(chat_id, message_id):
+    await client.pin_message(chat_id, message_id)
+
+def upload_file(file_path):
+    response = requests.put(f"https://pixeldrain.com/api/file/{CONFIG_PDUP_API}", files={'file': open(file_path, 'rb')})
+    hash_id = response.json().get('id')
+    return f"https://pixeldrain.com/u/{hash_id}"
+
+def fetch_progress():
+    with open(os.path.join(ROOT_DIRECTORY, "build.log"), 'r') as f:
+        lines = f.readlines()
+    progress = [line for line in lines if ' ninja' in line][-1].split()[0]
+    return progress if progress else "Initializing the build system..."
+
+def main():
+    # CLI parameters
+    import sys
+    args = sys.argv[1:]
+    SYNC = CLEAN = False
+    for arg in args:
+        if arg in ['-s', '--sync']:
+            SYNC = True
+        elif arg in ['-c', '--clean']:
+            CLEAN = True
+        elif arg in ['-o', '--official']:
+            if CONFIG_OFFICIAL_FLAG:
+                OFFICIAL = "1"
+            else:
+                print(f"{YELLOW}\nERROR: Please specify the flag to export for official build in the configuration!!{RESET}\n")
+                sys.exit(1)
+        elif arg in ['-h', '--help']:
+            print(f"\nNote: • You should specify all the mandatory variables in the script!\n"
+                  f"      • Just run \"./{sys.argv[0]}\" for normal build\n"
+                  f"Usage: ./build_rom.py [OPTION]\n"
+                  f"Example:\n"
+                  f"    ./{os.path.basename(sys.argv[0])} -s -c or ./{os.path.basename(sys.argv[0])} --sync --clean\n"
+                  f"\nMandatory options:\n"
+                  f"    No option is mandatory!, just simply run the script without passing any parameter.\n"
+                  f"\nOptions:\n"
+                  f"    -s, --sync            Sync sources before building.\n"
+                  f"    -c, --clean           Clean build directory before compilation.\n"
+                  f"    -o, --official        Build the official variant during compilation.\n")
+            sys.exit(0)
+        else:
+            print(f"{YELLOW}\nUnknown parameter(s) passed: {arg}{RESET}\n")
+            sys.exit(1)
+
+    # Configuration Checking
+    if not CONFIG_LUNCH or not CONFIG_TARGET:
+        print(f"{YELLOW}\nERROR: Please specify all of the mandatory variables!! Exiting now...{RESET}\n")
+        sys.exit(1)
+
+    # Cleanup Files
+    for file in ["out/error.log", "out/.lock", os.path.join(ROOT_DIRECTORY, "build.log")]:
+        if os.path.exists(file):
+            os.remove(file)
+
+    # Jobs Configuration
+    CORE_COUNT = os.cpu_count()
+    CONFIG_SYNC_JOBS = 12 if CORE_COUNT > 8 else CORE_COUNT
+    CONFIG_COMPILE_JOBS = CORE_COUNT
+
+    # Execute Parameters
+    if SYNC:
+        sync_start_message = (f"🟡 | <i>Syncing sources!!</i>\n\n"
+                              f"<b>• ROM:</b> <code>{ROM_NAME}</code>\n"
+                              f"<b>• DEVICE:</b> <code>{DEVICE}</code>\n"
+                              f"<b>• JOBS:</b> <code>{CONFIG_SYNC_JOBS} Cores</code>\n"
+                              f"<b>• DIRECTORY:</b> <code>{os.getcwd()}</code>")
+        sync_message_id = await send_message(sync_start_message, CONFIG_CHATID)
+
+        SYNC_START = time.time()
+
+        print(f"{BOLD_GREEN}\nStarting to sync sources now...{RESET}\n")
+        sync_command = f"repo sync -c --jobs-network={CONFIG_SYNC_JOBS} -j{CONFIG_SYNC_JOBS} --jobs-checkout={CONFIG_SYNC_JOBS} --optimized-fetch --prune --force-sync --no-clone-bundle --no-tags"
+        if subprocess.call(sync_command, shell=True) != 0:
+            print(f"{YELLOW}\nInitial sync has failed!!{RESET}\n{BOLD_GREEN}\nTrying to sync again with lesser arguments...{RESET}\n")
+            if subprocess.call(f"repo sync -j{CONFIG_SYNC_JOBS}", shell=True) != 0:
+                print(f"{YELLOW}\nSyncing has failed completely!{RESET}\n{BOLD_GREEN}\nStarting the build now...{RESET}\n")
+            else:
+                SYNC_END = time.time()
+        else:
+            SYNC_END = time.time()
+
+        if SYNC_END:
+            DIFFERENCE = SYNC_END - SYNC_START
+            MINUTES = (DIFFERENCE % 3600) // 60
+            SECONDS = ((DIFFERENCE % 3600) % 60)
+            sync_finished_message = (f"🟢 | <i>Sources synced!!</i>\n\n"
+                                     f"<b>• ROM:</b> <code>{ROM_NAME}</code>\n"
+                                     f"<b>• DEVICE:</b> <code>{DEVICE}</code>\n"
+                                     f"<b>• JOBS:</b> <code>{CONFIG_SYNC_JOBS} Cores</code>\n"
+                                     f"<b>• DIRECTORY:</b> <code>{os.getcwd()}</code>\n\n"
+                                     f"<i>Syncing took {MINUTES} minutes(s) and {SECONDS} seconds(s)</i>")
+            await edit_message(sync_finished_message, CONFIG_CHATID, sync_message_id)
+        else:
+            sync_failed_message = (f"🔴 | <i>Syncing sources failed!!</i>\n\n"
+                                   f"<i>Trying to compile the ROM now...</i>")
+            await edit_message(sync_failed_message, CONFIG_CHATID, sync_message_id)
+
+    if CLEAN:
+        print(f"{BOLD_GREEN}\nNuking the out directory now...{RESET}\n")
+        subprocess.call("rm -rf out", shell=True)
+
+    build_start_message = (f"🟡 | <i>Compiling ROM...</i>\n\n"
+                           f"<b>• ROM:</b> <code>{ROM_NAME}</code>\n"
+                           f"<b>• DEVICE:</b> <code>{DEVICE}</code>\n"
+                           f"<b>• JOBS:</b> <code>{CONFIG_COMPILE_JOBS} Cores</code>\n"
+                           f"<b>• TYPE:</b> <code>{'Official' if OFFICIAL == '1' else 'Unofficial'}</code>\n"
+                           f"<b>• PROGRESS</b>: <code>Lunching...</code>")
+    build_message_id = await send_message(build_start_message, CONFIG_CHATID)
+
+    BUILD_START = time.time()
+
+    print(f"{BOLD_GREEN}\nSetting up the build environment...{RESET}")
+    subprocess.call("source build/envsetup.sh", shell=True)
+
+    print(f"{BOLD_GREEN}\nStarting to lunch {DEVICE} now...{RESET}")
+    if subprocess.call(f"lunch {CONFIG_LUNCH}", shell=True) == 0:
+        print(f"{BOLD_GREEN}\nStarting to build now...{RESET}")
+        subprocess.call(f"m installclean -j{CONFIG_COMPILE_JOBS}", shell=True)
+        subprocess.call(f"m {CONFIG_TARGET} -j{CONFIG_COMPILE_JOBS} 2>&1 | tee -a {os.path.join(ROOT_DIRECTORY, 'build.log')}", shell=True)
+    else:
+        print(f"{YELLOW}\nFailed to lunch {DEVICE}{RESET}")
+        build_failed_message = (f"🔴 | <i>ROM compilation failed...</i>\n\n"
+                                f"<i>Failed at lunching {DEVICE}...</i>")
+        await edit_message(build_failed_message, CONFIG_CHATID, build_message_id)
+        await send_sticker(STICKER_URL, CONFIG_CHATID)
+        sys.exit(1)
+
+    previous_progress = ""
+    while subprocess.call("jobs -r", shell=True) == 0:
+        current_progress = fetch_progress()
+        if current_progress != previous_progress:
+            build_progress_message = (f"🟡 | <i>Compiling ROM...</i>\n\n"
+                                      f"<b>• ROM:</b> <code>{ROM_NAME}</code>\n"
+                                      f"<b>• DEVICE:</b> <code>{DEVICE}</code>\n"
+                                      f"<b>• JOBS:</b> <code>{CONFIG_COMPILE_JOBS} Cores</code>\n"
+                                      f"<b>• TYPE:</b> <code>{'Official' if OFFICIAL == '1' else 'Unofficial'}</code>\n"
+                                      f"<b>• PROGRESS:</b> <code>{current_progress}</code>")
+            await edit_message(build_progress_message, CONFIG_CHATID, build_message_id)
+            previous_progress = current_progress
+        time.sleep(5)
+
+    build_progress_message = (f"🟡 | <i>Compiling ROM...</i>\n\n"
+                              f"<b>• ROM:</b> <code>{ROM_NAME}</code>\n"
+                              f"<b>• DEVICE:</b> <code>{DEVICE}</code>\n"
+                              f"<b>• JOBS:</b> <code>{CONFIG_COMPILE_JOBS} Cores</code>\n"
+                              f"<b>• TYPE:</b> <code>{'Official' if OFFICIAL == '1' else 'Unofficial'}</code>\n"
+                              f"<b>• PROGRESS:</b> <code>{fetch_progress()}</code>")
+    await edit_message(build_progress_message, CONFIG_CHATID, build_message_id)
+
+    BUILD_END = time.time()
+    DIFFERENCE = BUILD_END - BUILD_START
+    HOURS = DIFFERENCE // 3600
+    MINUTES = (DIFFERENCE % 3600) // 60
+
+    if os.path.exists("out/error.log"):
+        build_failed_message = (f"🔴 | <i>ROM compilation failed...</i>\n\n"
+                                f"<i>Check out the log below!</i>")
+        await edit_message(build_failed_message, CONFIG_ERROR_CHATID, build_message_id)
+        await send_file("out/error.log", CONFIG_ERROR_CHATID)
+    else:
+        ota_file = [f for f in os.listdir(OUT) if "ota" in f][-1]
+        os.remove(os.path.join(OUT, ota_file))
+
+        zip_file = [f for f in os.listdir(OUT) if DEVICE in f][-1]
+        zip_file_path = os.path.join(OUT, zip_file)
+
+        print(f"{BOLD_GREEN}\nStarting to upload the ZIP file now...{RESET}\n")
+        zip_file_url = upload_file(zip_file_path)
+        zip_file_md5sum = subprocess.check_output(f"md5sum {zip_file_path}", shell=True).split()[0].decode()
+        zip_file_size = subprocess.check_output(f"ls -sh {zip_file_path}", shell=True).split()[0].decode()
+
+        build_finished_message = (f"🟢 | <i>ROM compiled!!</i>\n\n"
+                                  f"<b>• ROM:</b> <code>{ROM_NAME}</code>\n"
+                                  f"<b>• DEVICE:</b> <code>{DEVICE}</code>\n"
+                                  f"<b>• TYPE:</b> <code>{'Official' if OFFICIAL == '1' else 'Unofficial'}</code>\n"
+                                  f"<b>• SIZE:</b> <code>{zip_file_size}</code>\n"
+                                  f"<b>• MD5SUM:</b> <code>{zip_file_md5sum}</code>\n"
+                                  f"<b>• DOWNLOAD:</b> {zip_file_url}\n\n"
+                                  f"<i>Compilation took {HOURS} hours(s) and {MINUTES} minutes(s)</i>")
+        await edit_message(build_finished_message, CONFIG_CHATID, build_message_id)
+        await pin_message(CONFIG_CHATID, build_message_id)
+
+    if POWEROFF:
+        print(f"{BOLD_GREEN}\nAyo, powering off server...{RESET}")
+        subprocess.call("sudo poweroff", shell=True)
+
+if __name__ == "__main__":
+    with client:
+        client.loop.run_until_complete(main())
