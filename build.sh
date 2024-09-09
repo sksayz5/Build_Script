@@ -6,9 +6,8 @@ git config --global user.name "Shravan55555"
 git config --global user.email "srasidda.ks@gmail.com"
 
 repo init -u https://github.com/PixelOS-AOSP/manifest.git -b fourteen --git-lfs
-git clone https://github.com/sksayz5/local_manifest.git -b main .repo/local_manifests
 repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-
+git clone https://github.com/sksayz5/local_manifest.git -b main .repo/local_manifests
 source build/envsetup.sh
 
 
