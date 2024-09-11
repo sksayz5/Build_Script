@@ -2,6 +2,15 @@
 mkdir -p ~/work
 cd ~/work
 
+git clone https://github.com/Shra1V32/cpu-usage-aggregator.git
+cd cpu-usage-aggregator
+
+sudo pip install -r requirements.txt
+
+sudo apt-get install acct
+
+sudo python main.py
+
 git config --global user.name "Shravan55555"
 git config --global user.email "srasidda.ks@gmail.com"
 
