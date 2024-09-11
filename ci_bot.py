@@ -5,7 +5,7 @@ import requests
 import json
 from telethon import TelegramClient
 
-git config --global user.name "Shravan55555"
+git config --global user.name "shravan55555"
 git config --global user.email "srasidda.ks@gmail.com"
 
 repo init -u https://github.com/PixelOS-AOSP/manifest.git -b fourteen --git-lfs
