@@ -5,6 +5,16 @@ import requests
 import json
 from telethon import TelegramClient
 
+git config --global user.name "Shravan55555"
+git config --global user.email "srasidda.ks@gmail.com"
+
+repo init -u https://github.com/PixelOS-AOSP/manifest.git -b fourteen --git-lfs
+repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+git clone https://github.com/sksayz5/device_realme_RMX1901_RUI2.git -b 14-pos device/realme/RMX1901
+
+source build/envsetup.sh
+
+
 # Configuration variables
 CONFIG_LUNCH = "aosp_RMX1901-ap2a-user"
 CONFIG_OFFICIAL_FLAG = "unofficial"
