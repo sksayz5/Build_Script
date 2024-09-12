@@ -2,28 +2,20 @@
 mkdir -p ~/work
 cd ~/work
 
-git clone https://github.com/sksayz5/cpu-usage-aggregator.git
-cd cpu-usage-aggregator
-
-sudo pip install -r requirements.txt
-
-sudo apt-get install acct
-
-sudo python main.py && cd ../..
 
 git config --global user.name "Shravan55555"
 git config --global user.email "srasidda.ks@gmail.com"
 
-repo init -u https://github.com/PixelOS-AOSP/manifest.git -b fourteen --git-lfs
+repo init -u https://github.com/DerpFest-AOSP/manifest.git -b 14
+git clone https://github.com/shravansayz/local_manifests --depth 1 -b derp14 .repo/local_manifests
 repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-git clone https://github.com/sksayz5/device_realme_RMX1901_RUI2.git -b 14-pos device/realme/RMX1901
 
 source build/envsetup.sh
 
 
-CONFIG_LUNCH="aosp_RMX1901-ap2a-user"
+CONFIG_LUNCH="derp_RMX1901-user"
 CONFIG_OFFICIAL_FLAG="unofficial"
-CONFIG_TARGET="bacon"
+CONFIG_TARGET="derp"
  
  # Telegram Configuration
 CONFIG_CHATID="-1001983626693"
