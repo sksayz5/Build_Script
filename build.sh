@@ -12,12 +12,13 @@ repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
 source build/envsetup.sh
 
-
 CONFIG_LUNCH="derp_RMX1901-user"
 CONFIG_OFFICIAL_FLAG="unofficial"
 CONFIG_TARGET="derp"
- 
+
+
  # Telegram Configuration
+
 CONFIG_CHATID="-1001983626693"
 CONFIG_BOT_TOKEN="6268171294:AAGBIBXu3gEQeegjB99FUpLFJrDzp9zr22E"
 CONFIG_ERROR_CHATID="-1001983626693"
@@ -101,7 +102,7 @@ send_message() {
         -d "parse_mode=html" \
         -d "disable_web_page_preview=true" \
         -d text="$1")
-    local message_id=$(echo "$response" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
+    local MESSAGE_ID=$(echo "$RESPONSE" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
     echo "$MESSAGE_ID"
 }
 
@@ -130,12 +131,6 @@ send_sticker() {
         -F "is_video=false"
 }
 
-pin_message() {
-    curl "$BOT_PIN_URL" \
-        -d chat_id="$1" \
-        -d message_id="$2"
-}
-
 upload_file() {
     RESPONSE=$(curl -T "$1" -u :"$CONFIG_PDUP_API" https://pixeldrain.com/api/file/)
     HASH=$(echo "$RESPONSE" | grep -Po '(?<="id":")[^"]*')
@@ -148,8 +143,8 @@ send_message_to_error_chat() {
         -d "parse_mode=html" \
         -d "disable_web_page_preview=true" \
         -d text="$1")
-    local message_id=$(echo "$response" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
-    echo "$message_id"
+    local MESSAGE_ID=$(echo "$RESPONSE" | grep -o '"message_id":[0-9]*' | cut -d':' -f2)
+    echo "$MESSAGE_ID"
 }
 
 send_file_to_error_chat() {
@@ -356,7 +351,6 @@ else
 <i>Compilation took $HOURS hours(s) and $MINUTES minutes(s)</i>"
 
     edit_message "$build_finished_message" "$CONFIG_CHATID" "$build_message_id"
-    pin_message "$CONFIG_CHATID" "$build_message_id"
     send_sticker "$STICKER_URL" "$CONFIG_CHATID"
 fi
 
